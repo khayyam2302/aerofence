@@ -122,11 +122,15 @@ def drive(out: Path):
                             "rid_ts_unix": t0 + tb, "rid_ts_tenths": int(round(((t0 + tb) % 3600) * 10))})
     for n in names:
         pd.DataFrame(rows[n]).to_csv(out / "logs" / f"rid_{n}_SYNTHETIC.csv", index=False)
+    # transmitter-side log: the independent denominator of the packet reception ratio
+    pd.DataFrame({"rid_ts_unix": t0 + np.arange(0, tr[-1, 0], 1.0),
+                  "data_label": "SYNTHETIC_EXAMPLE_NOT_MEASURED"}).to_csv(out / "tx_log.csv", index=False)
     nl = {n: dict(zip(("lat", "lon"), to_ll(rx[j, 0], rx[j, 1])), h=1.5) for j, n in enumerate(names)}
     (out / "nodes.json").write_text(json.dumps(nl, indent=1))
     (out / "test.json").write_text(json.dumps({
         "fence_center": [LAT0, LON0], "fence_side_m": 200, "warn_side_m": 300,
         "uas_id": "TEST-ONLY-SYNTHETIC-DRIVE", "flight_log": "gps_track.csv", "tx_height_m": 1.5,
+        "tx_log": "tx_log.csv", "clock_offset_s": {n: 0.0 for n in names},
         "note": "SYNTHETIC PIPELINE TEST, NOT FIELD DATA"}, indent=1))
     print("wrote", out)
 

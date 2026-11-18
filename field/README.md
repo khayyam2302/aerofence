@@ -6,10 +6,12 @@ software for each node, the analysis script, and the test protocol.
 | File | Purpose |
 |---|---|
 | `rid_receiver.py` | Runs on each Raspberry Pi. Captures Remote ID over Wi-Fi (beacon and NAN) and Bluetooth, decodes it, and writes one CSV row per message with the node's own timestamp |
-| `field_analysis.py` | Runs on your laptop after the test. Computes time to first fix, latency, packet reception, position error and a path-loss fit, runs the AeroFence fusion on the real messages, and draws the figures |
+| `field_analysis.py` | Runs on your laptop after the test. Computes time to first fix, receive delay, packet reception, position error and a path-loss fit, runs the AeroFence fusion on the real messages, and draws the figures |
 | `make_test_dataset.py` | Pipeline test only. Writes a synthetic folder so you can check `field_analysis.py` before flying. Never report its output |
 
-The decoder has been checked against the official Open Drone ID C library: messages encoded by `opendroneid-core-c` decode to the same values.
+**Status.** This is preparatory software. No node has yet been built, and none of it has been run on live Remote ID traffic. Nothing produced here is a measured result until real logs and independent ground truth exist.
+
+**Decoder tests.** `tests/test_decoder.py` (in the repository root) checks the decoder against reference packets built with the Open Drone ID C library (`opendroneid-core-c`): Basic ID, Location and System messages, message packs, complete Wi-Fi beacon and NAN frames, Bluetooth legacy service data, malformed input and time stamps across the UTC hour. Run `python3 -m pytest tests`. These tests use library-generated frames; parsing of frames captured from a real aircraft, in particular NAN frames, still has to be confirmed in the field, and so does the bearer that each aircraft and firmware actually use.
 
 ---
 
@@ -17,7 +19,7 @@ The decoder has been checked against the official Open Drone ID C library: messa
 
 | Item | Example | Note |
 |---|---|---|
-| Raspberry Pi 4 (2 GB+) or Pi 5 | with 32 GB microSD and case | |
+| Raspberry Pi 4 (2 GB+) | with 32 GB microSD and case | Target platform. A Pi 5 should also work. A Pi 3 has not been tested: check that it captures Wi-Fi frames reliably with the USB adapter before using it as a node |
 | USB Wi-Fi adapter with monitor mode | MediaTek MT7612U (e.g. Alfa AWUS036ACM) or MT7921AU | The built-in Pi Wi-Fi cannot capture Remote ID frames reliably |
 | USB GPS receiver | u-blox 7/8 (e.g. VK-162) | Gives each node an accurate clock, needed for latency |
 | Power bank | USB-C PD, 20,000 mAh | About 6 to 8 hours per node |
@@ -36,7 +38,7 @@ pip3 install --break-system-packages bleak
 mkdir -p ~/aerofence && cd ~/aerofence      # copy rid_receiver.py here
 ```
 
-**Time synchronisation with GPS** (so every node agrees on the time to a few ms):
+**Time synchronisation with GPS.** Without a pulse-per-second (PPS) input, the GPS time reaches chrony through serial messages and is coarse; the configuration below assumes about 0.1 s. How closely the nodes agree is not known in advance and must be measured at every test:
 
 ```bash
 sudo sed -i 's|^DEVICES=.*|DEVICES="/dev/ttyACM0"|; s|^GPSD_OPTIONS=.*|GPSD_OPTIONS="-n"|' /etc/default/gpsd
@@ -46,7 +48,15 @@ chronyc sources -v        # after 2-5 minutes outdoors, GPS should show with '*'
 ```
 
 If you also have internet at the field (phone hotspot), chrony uses NTP too. Write down the
-`chronyc tracking` "System time" offset at the start and end of each test.
+`chronyc tracking` "System time" offset of every node at the start and end of each test, and
+enter the mean in `test.json` as `clock_offset_s` (seconds, positive when the node clock is
+fast). If the offsets are larger than you can accept, add a GPS receiver with a PPS output.
+
+Three time quantities are kept apart in the analysis: the drone's broadcast time stamp, each
+node's own receive time, and each node's clock offset. The receive delay (receive time minus
+broadcast time stamp) contains the clock offset, so it is reported both as measured and with
+the recorded offset removed. The spread of receive times between nodes for the same broadcast
+is mostly clock offset and capture jitter, not network delay.
 
 **Check the Wi-Fi adapter** (usually `wlan1`; `wlan0` is the built-in one):
 
@@ -102,7 +112,19 @@ Then run:
 python3 field_analysis.py test_2026-12-xx
 ```
 
-It writes `results/summary.json`, `results/per_node.csv` and four figures. Send me the whole folder.
+It writes `results/summary.json`, `results/per_node.csv` and four figures. Keep the whole folder: it is the raw data behind any reported result.
+
+**Packet reception ratio.** The nodes cannot see broadcasts that all of them missed, so the
+expected number of broadcasts must come from an independent record. Give one of these in
+`test.json`, in order of preference:
+
+- `"tx_log": "tx.csv"`: a transmitter-side log with column `rid_ts_unix` (or `rid_ts_tenths`
+  and `tx_time_unix`), for example the serial log of an ESP32 ArduRemoteID beacon;
+- `"reference_node": "N1"`: one extra node placed within a few metres of the transmitter;
+- `"broadcast_hz": 1`: the nominal Location message rate. This is only an assumption; if the
+  aircraft sends more often, the ratio is overstated.
+
+The method used is written to `summary.json` under `prr_denominator`.
 
 ## 6b. Ground drive-through test (no flight needed)
 
@@ -135,7 +157,7 @@ CSV with these columns (same as `gps_track_synthetic_template.csv`):
 zone edge (TTFF) and 60-s stops at 50, 100, 200 and 300 m from a node (reception vs distance).
 
 **Outputs that matter for the paper** (results/summary.json):
-- `per_node` and `network`: TTFF, receive delay median/95th percentile, packet reception ratio
+- `per_node` and `network`: TTFF, receive delay median/95th percentile (as measured and with the clock offset removed), packet reception ratio, and `prr_denominator`
 - `path_loss`: exponent and shadowing spread, fitted by a truncated-normal maximum-likelihood
   model, because packets below the receiver sensitivity are never logged and an ordinary
   least-squares fit underestimates the exponent (both values are reported)

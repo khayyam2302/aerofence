@@ -7,7 +7,10 @@ Inputs (one folder per test day):
   test.json         {"fence_center": [lat, lon], "fence_side_m": 200, "warn_side_m": 300,
                      "uas_id": "<serial number shown in the app>",
                      "power_on_utc": "2026-12-01T08:15:02Z",            (optional)
-                     "flight_log": "flight.csv", "flight_log_utc_offset_h": 3}
+                     "flight_log": "flight.csv", "flight_log_utc_offset_h": 3,
+                     "clock_offset_s": {"N1": 0.012, "N2": -0.004},     (optional, see below)
+                     "tx_log": "tx.csv" | "reference_node": "N1" | "broadcast_hz": 1}
+                                                                           (optional, see below)
   flight.csv        ground truth, one of:
                     - drone flight log as CSV: DJI Airdata or PhantomHelp Log Viewer export, or the GPS-track format
                     - GPS track CSV for ground tests (drive-through or carried beacon), columns
@@ -15,10 +18,30 @@ Inputs (one folder per test day):
                       heading_deg, data_label. Set "tx_height_m" in test.json (default 1.5 m).
                       Rows whose data_label contains "SYNTHETIC" mark the whole run as synthetic.
 
+Time quantities. Three clocks are involved and are kept apart:
+  rid_ts_unix   the time stamp the drone puts in each Location message (GNSS time);
+  rx_time_unix  the node's own clock when the frame was captured;
+  clock offset  how far each node's clock is from UTC ("System time" in `chronyc tracking`,
+                positive when the node clock is fast), entered per node as clock_offset_s.
+  The receive delay rx_time_unix - rid_ts_unix therefore contains the node's clock offset,
+  the drone's own time-stamping error, and the capture and processing delay. It is reported
+  as measured and, when clock_offset_s is given, also with the offset removed. It is not a
+  network latency: no backhaul is involved in these logs.
+
+Packet reception ratio. A receiver network cannot see broadcasts that every node missed, so
+the denominator must come from an independent record. In order of preference:
+  tx_log          transmitter-side log (CSV with column rid_ts_unix, or rid_ts_tenths plus
+                  tx_time_unix), e.g. the serial log of an ESP32 ArduRemoteID beacon;
+  reference_node  a node placed within a few metres of the transmitter, whose reception is
+                  taken as the transmitted set;
+  broadcast_hz    the nominal Location message rate (default 1 Hz). This is an assumption:
+                  if the aircraft sends more often, the ratio is overstated (and may exceed 1).
+  The method used is written to summary.json as prr_denominator.
+
 Outputs (folder results/):
-  summary.json      TTFF, latency, reception, position error, path-loss fit, alert latency
+  summary.json      TTFF, receive delay, reception, position error, path-loss fit, alert latency
   per_node.csv      the same per node and for the network
-  fig_*.pdf         latency CDF, reception vs distance, RSSI vs distance, track vs truth
+  fig_*.pdf         receive-delay CDF, reception vs distance, RSSI vs distance, track vs truth
 
 The offline fusion uses exactly the AeroFence code of the simulation study
 (aerofence/fusion.py), so simulated and measured KPIs are computed the same way.
@@ -41,6 +64,13 @@ from aerofence.metrics import drone_kpis  # noqa: E402
 from aerofence.sim import GENUINE, Params, zone_of  # noqa: E402
 
 R_E = 6378137.0
+
+
+def _rid_tenths_to_unix(tenths: int, ref_unix: float) -> float:
+    """Tenths of a second after the UTC hour, placed in the hour nearest to ref_unix."""
+    hour0 = ref_unix - (ref_unix % 3600)
+    t = hour0 + tenths / 10.0
+    return t - 3600 if t - ref_unix > 1800 else t + 3600 if ref_unix - t > 1800 else t
 
 
 def enu(lat, lon, lat0, lon0):
@@ -130,16 +160,37 @@ def analyse(folder: Path):
     loc["h_true"] = np.interp(loc.rid_ts_unix, fl.t_unix, fl.h_m)
     loc["x"], loc["y"] = enu(loc.lat.values, loc.lon.values, lat0, lon0)
     loc["pos_err_m"] = np.hypot(loc.x - loc.x_true, loc.y - loc.y_true)
-    loc["latency_s"] = loc.rx_time_unix - loc.rid_ts_unix
+    # receive delay: node clock minus the drone's broadcast time stamp (see module docstring)
+    offs = cfg.get("clock_offset_s", {})
+    loc["rx_delay_s"] = loc.rx_time_unix - loc.rid_ts_unix
+    loc["rx_delay_corr_s"] = loc.rx_delay_s - loc.node.map(lambda n: offs.get(str(n), np.nan))
     ni = {n: i for i, n in enumerate(names)}
     loc["node_i"] = loc.node.map(ni)
     loc["dist_m"] = np.sqrt((loc.x_true - rx[loc.node_i, 0]) ** 2 + (loc.y_true - rx[loc.node_i, 1]) ** 2
                             + (loc.h_true - rx[loc.node_i, 2]) ** 2)
     flight = loc[(loc.rid_ts_unix >= t_start) & (loc.rid_ts_unix <= t_end)]
-    # expected Location messages: one per transmitted timestamp seen by any node
+    # denominator of the packet reception ratio (see module docstring)
     sent = np.unique(np.round(flight.rid_ts_unix, 1))
-    nominal_hz = 1.0
-    n_expected = max(int((t_end - t_start) * nominal_hz), len(sent))
+    if cfg.get("tx_log"):
+        tx = pd.read_csv(folder / cfg["tx_log"])
+        if "rid_ts_unix" in tx:
+            tts = tx.rid_ts_unix.astype(float)
+        else:
+            tts = pd.Series([_rid_tenths_to_unix(int(a), float(b))
+                             for a, b in zip(tx.rid_ts_tenths, tx.tx_time_unix)], dtype=float)
+        tts = np.unique(np.round(tts[(tts >= t_start) & (tts <= t_end)], 1))
+        n_expected, prr_method = max(len(tts), 1), "transmitter log"
+    elif cfg.get("reference_node"):
+        ref = flight[flight.node == cfg["reference_node"]]
+        n_expected = max(int(np.unique(np.round(ref.rid_ts_unix, 1)).size), 1)
+        prr_method = f"reference node {cfg['reference_node']} next to the transmitter"
+    else:
+        hz = float(cfg.get("broadcast_hz", 1.0))
+        n_expected = max(int((t_end - t_start) * hz), 1)
+        prr_method = f"nominal broadcast rate {hz:g} Hz (assumption)"
+        if len(sent) > n_expected:
+            print(f"WARNING: {len(sent)} distinct broadcasts heard but only {n_expected} expected "
+                  f"at {hz:g} Hz; set broadcast_hz or tx_log in test.json")
 
     rows = []
     for n in names + ["network"]:
@@ -151,8 +202,9 @@ def analyse(folder: Path):
         rows.append({
             "node": n,
             "ttff_s": first - t_start,
-            "latency_median_ms": 1e3 * d.latency_s.median(),
-            "latency_p95_ms": 1e3 * d.latency_s.quantile(0.95),
+            "rx_delay_median_ms": 1e3 * d.rx_delay_s.median(),
+            "rx_delay_p95_ms": 1e3 * d.rx_delay_s.quantile(0.95),
+            "rx_delay_corr_median_ms": 1e3 * d.rx_delay_corr_s.median(),
             "prr": len(uniq) / n_expected,
             "pos_err_median_m": d.pos_err_m.median(),
             "pos_err_p95_m": d.pos_err_m.quantile(0.95),
@@ -206,13 +258,16 @@ def analyse(folder: Path):
                 "share_heard_by_3plus": float((mb.n_nodes >= 3).mean()),
                 "arrival_spread_ms_median": float(multi.spread_ms.median()) if len(multi) else None,
                 "arrival_spread_ms_p95": float(np.percentile(multi.spread_ms, 95)) if len(multi) else None}
-    by_bearer = {b: {"n": int(len(d)), "latency_ms_median": float(1e3 * d.latency_s.median()),
-                     "latency_ms_p95": float(1e3 * np.percentile(d.latency_s, 95))}
+    by_bearer = {b: {"n": int(len(d)), "rx_delay_ms_median": float(1e3 * d.rx_delay_s.median()),
+                     "rx_delay_ms_p95": float(1e3 * np.percentile(d.rx_delay_s, 95))}
                  for b, d in flight.groupby("bearer")} if "bearer" in flight else {}
     summary = {"data_status": "SYNTHETIC PIPELINE TEST, NOT MEASURED" if synthetic else "measured",
                "t_start_utc": pd.Timestamp(t_start, unit="s", tz="UTC").isoformat(),
                "duration_s": t_end - t_start, "n_nodes": len(names), "n_messages": int(len(flight)),
                "per_node": per_node.to_dict("records"),
+               "prr_denominator": {"method": prr_method, "expected_broadcasts": int(n_expected),
+                                   "distinct_broadcasts_heard": int(len(sent))},
+               "clock_offset_s": offs or "not provided: receive delays include clock offsets",
                "path_loss": {"P0_dbm_at_1m": float(P0), "n": float(n_pl), "shadow_std_db": shadow_sd,
                              "method": "truncated-normal ML" if r.success else "OLS",
                              "truncation_dbm": s_cut, "ols_P0_n": ols},
@@ -310,12 +365,12 @@ def figures(flight, per_node, out, P0, n_pl, fx, fy, rx, names, cfg, synthetic=F
     # latency CDF
     fig, ax = plt.subplots(figsize=(3.4, 2.3))
     for i, n in enumerate(names):
-        v = np.sort(1e3 * flight[flight.node == n].latency_s.values)
+        v = np.sort(1e3 * flight[flight.node == n].rx_delay_s.values)
         if len(v):
             ax.plot(v, np.arange(1, len(v) + 1) / len(v), color=cols[i % 6], lw=1.6, label=n)
-    ax.set_xlabel("Latency, receive time minus Remote ID timestamp (ms)"); ax.set_ylabel("CDF")
+    ax.set_xlabel("Receive delay: node clock minus Remote ID time stamp (ms)"); ax.set_ylabel("CDF")
     ax.legend(frameon=False, fontsize=6.5); ax.grid(color="#ddd", lw=0.5)
-    _save(fig, out / "fig_latency_cdf.pdf", synthetic)
+    _save(fig, out / "fig_rx_delay_cdf.pdf", synthetic)
     # reception vs distance (1-s bins of transmitted timestamps)
     fig, ax = plt.subplots(figsize=(3.4, 2.3))
     bins = np.arange(0, flight.dist_m.max() + 50, 50)

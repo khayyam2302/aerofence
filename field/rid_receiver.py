@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ODID_MSG_SIZE = 25
+ODID_PACK_MAX = 10
 ASTM_OUI = bytes.fromhex("FA0BBC")       # ASTM vendor OUI for Wi-Fi beacon Remote ID
 ASTM_OUI_TYPE = 0x0D
 NAN_OUI = bytes.fromhex("506F9A")        # Wi-Fi Alliance OUI (NAN service discovery)
@@ -100,20 +101,53 @@ def decode_message(m: bytes, rx_unix: float) -> dict:
 
 
 def decode_pack_or_single(payload: bytes, rx_unix: float) -> list[dict]:
-    """Payload starts at an ODID message header; either a single message or a pack (0xF)."""
+    """Payload starts at an ODID message header; either a single message or a pack (0xF).
+
+    A pack is rejected if its message size is not 25 bytes, if it claims more than 10
+    messages, or if the payload is shorter than the messages it claims."""
     if not payload:
         return []
     if payload[0] >> 4 == 0xF:            # message pack: header, size, count, messages
-        size, n = payload[1], payload[2]
-        if size != ODID_MSG_SIZE:
+        if len(payload) < 3:
             return []
-        msgs = []
-        for i in range(n):
-            s = 3 + i * size
-            msgs.append(decode_message(payload[s:s + size], rx_unix))
+        size, n = payload[1], payload[2]
+        if size != ODID_MSG_SIZE or not 1 <= n <= ODID_PACK_MAX or len(payload) < 3 + n * size:
+            return []
+        msgs = [decode_message(payload[3 + i * size:3 + (i + 1) * size], rx_unix) for i in range(n)]
         return [m for m in msgs if m]
     m = decode_message(payload[:ODID_MSG_SIZE], rx_unix)
     return [m] if m else []
+
+
+def parse_beacon_vendor_ie(info: bytes, rx_unix: float):
+    """Body of a vendor-specific IE (ID 221) in a beacon. Returns (counter, messages) or None."""
+    if len(info) > 5 and info[:3] == ASTM_OUI and info[3] == ASTM_OUI_TYPE:
+        return info[4], decode_pack_or_single(bytes(info[5:]), rx_unix)
+    return None
+
+
+def parse_ble_service_data(data, rx_unix: float):
+    """Service data for UUID 0xFFFA: application code 0x0D, counter, then one message.
+    Returns (counter, messages) or None."""
+    if not data or len(data) < 2 + ODID_MSG_SIZE or data[0] != BLE_APP_CODE:
+        return None
+    msgs = decode_pack_or_single(bytes(data[2:]), rx_unix)
+    return (data[1], msgs) if msgs else None
+
+
+def parse_nan_action(body: bytes, rx_unix: float):
+    """Body of a NAN service discovery action frame (after the 802.11 header).
+    Returns (counter, messages) or None."""
+    i = body.find(NAN_OUI + b"\x13")
+    if i < 0:
+        return None
+    # first ODID message-pack header after the NAN header: 0xF<ver>, size 25
+    for j in range(i + 4, len(body) - 3):
+        if body[j] >> 4 == 0xF and body[j + 1] == ODID_MSG_SIZE:
+            msgs = decode_pack_or_single(body[j:], rx_unix)
+            if msgs:
+                return body[j - 1], msgs
+    return None
 
 
 # --------------------------------------------------------------------------- logging
@@ -166,25 +200,16 @@ def wifi_loop(iface: str, channel: int, log: Logger):
         if pkt.haslayer(Dot11Beacon):
             el = pkt.getlayer(Dot11Elt)
             while el is not None:
-                if el.ID == 221 and len(el.info) > 5 and el.info[:3] == ASTM_OUI \
-                        and el.info[3] == ASTM_OUI_TYPE:
-                    counter = el.info[4]
-                    msgs = decode_pack_or_single(bytes(el.info[5:]), rx)
-                    if msgs:
-                        log.write("wifi_beacon", src, rssi, channel, counter, msgs, rx)
+                if el.ID == 221:
+                    res = parse_beacon_vendor_ie(bytes(el.info), rx)
+                    if res and res[1]:
+                        log.write("wifi_beacon", src, rssi, channel, res[0], res[1], rx)
                 el = el.payload.getlayer(Dot11Elt)
         else:
-            # Wi-Fi NAN service discovery frames (action frames) carrying an ODID pack:
-            raw = bytes(pkt[Dot11].payload)
-            i = raw.find(NAN_OUI + b"\x13")
-            if i >= 0:
-                # first ODID message-pack header after the NAN attribute: 0xF<ver>, size 25
-                for j in range(i + 4, len(raw) - 3):
-                    if raw[j] >> 4 == 0xF and raw[j + 1] == ODID_MSG_SIZE:
-                        msgs = decode_pack_or_single(raw[j:], rx)
-                        if msgs:
-                            log.write("wifi_nan", src, rssi, channel, raw[j - 1], msgs, rx)
-                        break
+            # Wi-Fi NAN service discovery frames (action frames) carrying an ODID pack
+            res = parse_nan_action(bytes(pkt[Dot11].payload), rx)
+            if res:
+                log.write("wifi_nan", src, rssi, channel, res[0], res[1], rx)
 
     sniff(iface=iface, prn=handle, store=False)
 
@@ -197,13 +222,9 @@ async def ble_loop(log: Logger):
 
     def cb(device, adv):
         rx = time.time()
-        data = adv.service_data.get(uuid)
-        if not data or data[0] != BLE_APP_CODE:
-            return
-        counter = data[1]
-        msgs = decode_pack_or_single(bytes(data[2:]), rx)
-        if msgs:
-            log.write("ble_legacy", device.address, adv.rssi, None, counter, msgs, rx)
+        res = parse_ble_service_data(adv.service_data.get(uuid), rx)
+        if res:
+            log.write("ble_legacy", device.address, adv.rssi, None, res[0], res[1], rx)
 
     scanner = BleakScanner(cb, scanning_mode="active")
     await scanner.start()
