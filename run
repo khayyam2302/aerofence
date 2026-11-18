@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Code Ocean entry point (also works locally: ./run). Writes everything to ../results.
+# Code Ocean entry point (also works locally: bash run). Writes everything to ../results.
 #   Default : regenerate all figures and tables from the stored results, and run the
 #             field-analysis pipeline test on synthetic data (about 1 minute).
 #   FULL=1  : rerun every Monte Carlo experiment first (about 1 h on 2 cores).

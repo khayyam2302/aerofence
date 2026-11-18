@@ -16,7 +16,7 @@ and figure in the revised manuscript and contains the Raspberry Pi field softwar
 | `experiments.py` | All experiment stages, writes `results/*.json` |
 | `calib/propagation_fit.py` | Fits path-loss exponent, shadowing and decorrelation distance to an external flight dataset; see `calib/README.md` |
 | `make_figures.py` | Draws the paper figures from `results/` into `figures/` |
-| `make_tables.py` | Rebuilds Tables 3, 7, 8, 10 and 12 from `results/` into `tables.md` |
+| `make_tables.py` | Rebuilds Tables 3, 7, 8, 10, 11 and 13 from `results/` into `tables.md` |
 | `run` | One-command reproduction (also the Code Ocean entry point) |
 | `results/*.json` | Stored outputs of every experiment stage, used by the two scripts above |
 | `field/` | Raspberry Pi Remote ID receiver, field analysis, and test protocol (see `field/README.md`) |
@@ -25,8 +25,8 @@ and figure in the revised manuscript and contains the Raspberry Pi field softwar
 
 ```bash
 pip install -r requirements.txt
-./run                           # figures + tables from stored results, about 1 min
-FULL=1 ./run                    # rerun all experiments first, about 1 h on 2 cores
+bash run                        # figures + tables from stored results, about 1 min
+FULL=1 bash run                 # rerun all experiments first, about 1 h on 2 cores
 ```
 
 Or step by step:

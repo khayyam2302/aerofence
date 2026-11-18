@@ -1,6 +1,6 @@
 """Regenerate the numerical tables of the paper from results/*.json (run experiments.py first).
 
-Writes one Markdown file with Tables 3, 7, 8, 10 and 12 so every number in the paper can be
+Writes one Markdown file with Tables 3, 7, 8, 10, 11 and 13 so every number in the paper can be
 checked against the stored results.
 
 Usage: python3 make_tables.py [output_folder]
