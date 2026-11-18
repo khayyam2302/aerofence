@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Code Ocean entry point (also works locally: ./run). Writes everything to ../results.
+#   Default : regenerate all figures and tables from the stored results, and run the
+#             field-analysis pipeline test on synthetic data (about 1 minute).
+#   FULL=1  : rerun every Monte Carlo experiment first (about 1 h on 2 cores).
+set -euo pipefail
+cd "$(dirname "$0")"
+OUT="${RESULTS_DIR:-../results}"
+mkdir -p "$OUT"
+if [ "${FULL:-0}" = "1" ]; then
+  python3 experiments.py learn roc kpi ttff tb esc con flip compare combo diag robust sens
+fi
+python3 make_figures.py "$OUT/figures"
+python3 make_tables.py "$OUT"
+# field pipeline check on synthetic data (labelled SYNTHETIC, never field results)
+python3 field/make_test_dataset.py "$OUT/field_pipeline_test" --drive
+python3 field/field_analysis.py "$OUT/field_pipeline_test" > "$OUT/field_pipeline_test/log.txt"
+echo "done: $OUT"

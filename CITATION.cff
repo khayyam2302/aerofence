@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the article below."
+version: "1.0"
+repository-code: "https://github.com/khayyam2302/aerofence"
+title: "AeroFence: simulator, experiments and Raspberry Pi Remote ID receiver"
+authors:
+  - family-names: Khan
+    given-names: Muhammad Asghar
+  - family-names: Muthanna
+    given-names: Ammar
+  - family-names: Barb
+    given-names: Gordana
+  - family-names: Silaghi
+    given-names: Andrei-Marius
+license: MIT
+preferred-citation:
+  type: article
+  title: "AeroFence: Confidence-Aware Drone Tracking and Geofence Alerting Using Networked Remote ID Receivers"
+  authors:
+    - family-names: Khan
+      given-names: Muhammad Asghar
+    - family-names: Muthanna
+      given-names: Ammar
+    - family-names: Barb
+      given-names: Gordana
+    - family-names: Silaghi
+      given-names: Andrei-Marius
+  journal: "IEEE Open Journal of Intelligent Transportation Systems"
+  status: submitted
