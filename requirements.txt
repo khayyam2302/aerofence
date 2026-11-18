@@ -3,6 +3,7 @@ numpy>=1.26        # tested 2.5.3
 pandas>=2.0        # tested 3.0.5
 matplotlib>=3.8    # tested 3.11.2
 scipy>=1.11        # tested 1.18.1 (field analysis: truncated-normal path-loss fit)
+pytest>=7          # unit tests only (tests/)
 # Raspberry Pi receiver only (install on the nodes, not needed for the paper results):
 # scapy>=2.5
 # bleak>=0.21

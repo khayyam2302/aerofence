@@ -129,19 +129,30 @@ def table12(G):
 
 
 if __name__ == "__main__":
-    parts = ["# AeroFence: tables regenerated from results/*.json\n"]
+    ver = (ROOT / "VERSION").read_text().strip() if (ROOT / "VERSION").exists() else "unknown"
+    parts = ["# AeroFence: tables regenerated from results/*.json\n",
+             f"Code version {ver}. Every table lists the scene seeds it was computed from; training "
+             "and test seeds never overlap (training 1000-1059).\n"]
     def _d():
         try:
             return J("diag")
         except FileNotFoundError:
             return None
-    for title, fn in [("Table 3. Learned logistic model", lambda: table3(J("learn"), _d())),
-                      ("Model diagnostics (Section VI)", lambda: diag_text(J("diag"))),
-                      ("Table 7. Operational indicators (learned weights)", lambda: table7(J("kpi"))),
-                      ("Table 8. Comparison of decision methods (Nr = 8)", lambda: table8(J("compare"), J("roc"), J("combo"))),
-                      ("Table 10. Robustness to radio assumptions", lambda: table_robust(J("robust"))),
-                      ("Table 11. Zone flips for boundary-skimming drones", lambda: table10(J("flip"))),
-                      ("Table 13. Global sensitivity (SRRC)", lambda: table12(J("sens_global")))]:
+    for title, fn in [("Table 3. Learned logistic model [training seeds 1000-1059, 60 scenes; "
+                       "intervals: 1000-replicate bootstrap]", lambda: table3(J("learn"), _d())),
+                      ("Model diagnostics (Section VI) [fit: seeds 1000-1059; held-out calibration: "
+                       "seeds 2000-2039]", lambda: diag_text(J("diag"))),
+                      ("Table 7. Operational indicators (learned weights) [seeds 0-99, 100 runs per "
+                       "setting]", lambda: table7(J("kpi"))),
+                      ("Table 8. Comparison of decision methods (Nr = 8) [operational runs: seeds "
+                       "5000-5099; AUC and detection at 5% FPR: held-out seeds 2000-2039]",
+                       lambda: table8(J("compare"), J("roc"), J("combo"))),
+                      ("Table 10. Robustness to radio assumptions [seeds 5000-5099, same scenes in "
+                       "every row]", lambda: table_robust(J("robust"))),
+                      ("Table 11. Zone flips for boundary-skimming drones [seeds 0-49, 50 runs per "
+                       "setting]", lambda: table10(J("flip"))),
+                      ("Table 13. Global sensitivity (SRRC) [60 Latin-hypercube samples, seeds "
+                       "8000-8007 for every sample]", lambda: table12(J("sens_global")))]:
         try:
             parts.append(f"## {title}\n\n{fn()}\n")
             print("ok", title)

@@ -20,6 +20,7 @@ and figure in the revised manuscript and contains the Raspberry Pi field softwar
 | `run` | One-command reproduction (also the Code Ocean entry point) |
 | `results/*.json` | Stored outputs of every experiment stage, used by the two scripts above |
 | `field/` | Raspberry Pi Remote ID receiver, field analysis, and test protocol (see `field/README.md`) |
+| `tests/` | Unit tests: Remote ID decoder against Open Drone ID reference packets, and tracker, geofence and escalation logic |
 
 ## Reproduce the paper
 
@@ -28,6 +29,8 @@ pip install -r requirements.txt
 bash run                        # figures + tables from stored results, about 1 min
 FULL=1 bash run                 # rerun all experiments first, about 1 h on 2 cores
 ```
+
+Run the tests with `python3 -m pytest tests` (needs `pytest`).
 
 Or step by step:
 
