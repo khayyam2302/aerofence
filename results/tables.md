@@ -1,6 +1,8 @@
 # AeroFence: tables regenerated from results/*.json
 
-## Table 3. Learned logistic model
+Code version 1.0. Every table lists the scene seeds it was computed from; training and test seeds never overlap (training 1000-1059).
+
+## Table 3. Learned logistic model [training seeds 1000-1059, 60 scenes; intervals: 1000-replicate bootstrap]
 
 | Term | beta | 95% bootstrap interval | Weight w |
 |---|---|---|---|
@@ -12,7 +14,7 @@
 
 P_on = 0.185 -> C_on = 0.626, C_off = 0.526; training epochs = 295781, positive share = 0.748; equal-weight threshold at 5% = 0.703
 
-## Model diagnostics (Section VI)
+## Model diagnostics (Section VI) [fit: seeds 1000-1059; held-out calibration: seeds 2000-2039]
 
 Held-out calibration: Brier 0.133 (climatology 0.193), ECE 0.049, 202923 epochs
 Label 10 m: w = 0.134, 0.031, 0.508, 0.327
@@ -22,7 +24,7 @@ Label 100 m: w = 0.124, 0.021, 0.374, 0.481
 boot_drone: beta 95% = [-12.03, -8.58], [0.41, 3.01], [-0.33, 1.02], [4.30, 6.80], [5.84, 7.17]; share with all coefficients >= 0: 0.884
 boot_scene: beta 95% = [-11.99, -8.63], [0.60, 2.93], [-0.22, 0.97], [4.24, 6.68], [5.80, 7.24]; share with all coefficients >= 0: 0.903
 
-## Table 7. Operational indicators (learned weights)
+## Table 7. Operational indicators (learned weights) [seeds 0-99, 100 runs per setting]
 
 | sigma | Nr | ttff | latency | continuity | verified | escalation | spoof_detect | genuine_investigate | silent_delay |
 |---|---|---|---|---|---|---|---|---|---|
@@ -35,7 +37,7 @@ boot_scene: beta 95% = [-11.99, -8.63], [0.60, 2.93], [-0.22, 0.97], [4.24, 6.68
 | 10 m | 8 | 0.57 ± 0.10 | 4.06 ± 0.42 | 1.00 ± 0.01 | 0.96 ± 0.03 | 0.028 ± 0.039 | 0.77 ± 0.22 | 0.011 ± 0.031 | 2.81 ± 0.27 |
 | 10 m | 12 | 0.54 ± 0.08 | 3.94 ± 0.31 | 1.00 ± 0.01 | 0.97 ± 0.03 | 0.029 ± 0.047 | 0.83 ± 0.24 | 0.013 ± 0.035 | 2.80 ± 0.32 |
 
-## Table 8. Comparison of decision methods (Nr = 8)
+## Table 8. Comparison of decision methods (Nr = 8) [operational runs: seeds 5000-5099; AUC and detection at 5% FPR: held-out seeds 2000-2039]
 
 | Method | latency | flips s3 | flips s10 | escalation | spoof all | smooth | jump | AUC | TPR@5% | cost us/msg |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -50,7 +52,7 @@ boot_scene: beta 95% = [-11.99, -8.63], [0.60, 2.93], [-0.22, 0.97], [4.24, 6.68
 Held-out operating points (thresholds fixed on training scenes): aerofence_L: FPR 0.040, detection 0.764 (smooth 0.894, jump 0.640); innov: FPR 0.057, detection 0.529 (smooth 0.035, jump 1.000); aeroinnov: FPR 0.044, detection 0.948 (smooth 0.894, jump 1.000)
 Joint calibration chosen: C_on = 0.626, innovation threshold = 112.5
 
-## Table 10. Robustness to radio assumptions
+## Table 10. Robustness to radio assumptions [seeds 5000-5099, same scenes in every row]
 
 | Condition | (f) esc | (f) det | (g) esc | (g) det | (d) esc | (d) det |
 |---|---|---|---|---|---|---|
@@ -62,7 +64,7 @@ Joint calibration chosen: C_on = 0.626, innovation threshold = 112.5
 | Tx pattern 6 dB | 0.031 | 0.82 | 0.032 | 0.94 | 0.059 | 0.63 |
 | Spoofer power +/-6 dB | 0.030 | 0.77 | 0.030 | 0.93 | 0.022 | 0.60 |
 
-## Table 11. Zone flips for boundary-skimming drones
+## Table 11. Zone flips for boundary-skimming drones [seeds 0-49, 50 runs per setting]
 
 | Nr | raw: flips / spurious, latency | KF no hysteresis | KF hysteresis + dwell |
 |---|---|---|---|
@@ -71,7 +73,7 @@ Joint calibration chosen: C_on = 0.626, innovation threshold = 112.5
 | 8 | 2.47 / 1.643, 1.6 s | 1.05 / 0.257, 3.7 s | 0.59 / 0.014, 21.8 s |
 | 12 | 2.49 / 1.650, 1.5 s | 1.05 / 0.250, 4.2 s | 0.59 / 0.014, 22.3 s |
 
-## Table 13. Global sensitivity (SRRC)
+## Table 13. Global sensitivity (SRRC) [60 Latin-hypercube samples, seeds 8000-8007 for every sample]
 
 | parameter | latency | escalation | spoof_detect | spurious_flip | verified | silent_delay |
 |---|---|---|---|---|---|---|
