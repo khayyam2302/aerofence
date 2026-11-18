@@ -1,79 +1,76 @@
-# AeroFence
+# Channel calibration from an external flight dataset
 
-Code for "AeroFence: Confidence-Aware Drone Tracking and Geofence Alerting Using
-Networked Remote ID Receivers" (Khan, Muthanna, Barb, Silaghi). It regenerates every table
-and figure in the revised manuscript and contains the Raspberry Pi field software.
+`propagation_fit.py` fits the log-distance model
 
-## Layout
+    P(d) = P(d0) - 10 n log10(d/d0) + X,  X ~ N(0, sigma^2)
 
-| Path | Content |
+to signal levels that one fixed sensor measured during drone flights with GPS logs. It estimates the three channel parameters the AeroFence simulator uses:
+
+- the path-loss exponent `n_pl`;
+- the slow shadowing spread `shadow_db`;
+- its decorrelation distance `shadow_dcorr`.
+
+All three come with block-bootstrap 95% intervals. The absolute level P(d0) depends on the transmitter, band, antennas and SNR reference, so it is reported but not transferred.
+
+## Steps
+
+1. Check the dataset first. You need:
+   - the sensor's coordinates;
+   - SNR or RSS that is consistent over time;
+   - a way to keep only the aircraft's own signal (not the controller's);
+   - a licence that allows academic analysis.
+2. Run the fit, giving the column names of your files:
+
+       python3 propagation_fit.py --sensor sensor.csv --sensor-time utc --sensor-value snr \
+           --sensor-filter "source=='aircraft'" --sensor-track target \
+           --flight ua1.csv ua2.csv ua3.csv --flight-track-name UA1 UA2 UA3 \
+           --flight-time time_ms --flight-lat lat --flight-lon lon --flight-alt alt \
+           --sensor-pos LAT,LON,ALT --out ../results_channel
+
+   Times can be epoch seconds, epoch milliseconds or date-time strings in UTC. Use `--time-offset` if the two clocks differ.
+3. Rerun the simulation with the fitted channel. Results go to a separate folder.
+   - (a) Nominal weights and thresholds under the measured channel:
+
+         mkdir -p results_measured_fixed
+         cp results/learn.json results/combo.json results_measured_fixed/
+         AF_CHANNEL=results_channel/channel_measured.json AF_TAG=measured_fixed \
+             python3 experiments.py kpi compare roc
+
+   - (b) Refit weights and thresholds on the measured channel:
+
+         AF_CHANNEL=results_channel/channel_measured.json AF_TAG=measured_refit \
+             python3 experiments.py learn roc kpi compare combo
+
+## Outputs
+
+| File | Contents |
 |---|---|
-| `aerofence/sim.py` | Simulator: geometry, traffic, threat classes, Remote ID broadcast, link model |
-| `aerofence/fusion.py` | Tracker, evidence terms (S_div, S_con, S_mot, S_geo), verification, geofence, escalation |
-| `aerofence/metrics.py` | Operational indicators |
-| `aerofence/analysis.py` | Suspicion scores, ROC, logistic regression, bootstrap |
-| `aerofence/run.py` | Runs one setting for several decision methods |
-| `experiments.py` | All experiment stages, writes `results/*.json` |
-| `calib/propagation_fit.py` | Fits path-loss exponent, shadowing and decorrelation distance to an external flight dataset; see `calib/README.md` |
-| `make_figures.py` | Draws the paper figures from `results/` into `figures/` |
-| `make_tables.py` | Rebuilds Tables 3, 7, 8, 10 and 12 from `results/` into `tables.md` |
-| `run` | One-command reproduction (also the Code Ocean entry point) |
-| `results/*.json` | Stored outputs of every experiment stage, used by the two scripts above |
-| `field/` | Raspberry Pi Remote ID receiver, field analysis, and test protocol (see `field/README.md`) |
+| `channel_fit.json` | Fit, intervals and the decorrelation fit |
+| `channel_measured.json` | Simulator parameters |
+| `channel_fit.pdf` | Plot of the data and the fit |
+| `synchronized_samples.csv` | Every matched sample with its distance |
 
-## Reproduce the paper
+## Method notes
 
-```bash
-pip install -r requirements.txt
-./run                           # figures + tables from stored results, about 1 min
-FULL=1 ./run                    # rerun all experiments first, about 1 h on 2 cores
-```
+- **Weak signals.** Signals below the sensor floor are never logged, so ordinary least squares underestimates n. The script uses a truncated-normal maximum-likelihood fit.
+- **Decorrelation distance.** The residual correlation is fitted against 3-D distance travelled, only on the range where truncation is negligible. In the bootstrap, pairs are formed only within one drawn block, so independent blocks are never treated as neighbours. Correlation is observed only up to 400 m, so the estimate is capped at 800 m. `d_corr_upper_bound_identified` is false when the data cannot bound it from above.
+- **Intervals.** They resample 120-s blocks within each flight.
+- **Sensitivity.** `channel_fit.json` also reports the fit with the floor raised by 3 and 6 dB, with minimum distances of 50 and 100 m, and with three margins for the decorrelation range. If these move n by more than its interval, the fitted model is not adequate for the data, and that has to be reported.
 
-Or step by step:
+## Self-test on synthetic data
 
-```bash
-python3 experiments.py          # all stages, writes results/*.json
-python3 make_figures.py         # figures/*.pdf
-python3 make_tables.py          # results/tables.md
-```
+Run it with:
 
-## Code Ocean
+    python3 propagation_fit.py --selftest
 
-Create a capsule with the Python 3 environment, add `numpy pandas matplotlib scipy` with
-the pip package manager, upload this folder to `/code`, and set `run` as the file to run.
-Outputs appear in `/results`.
+It uses 20 synthetic data sets, each with three 15-min flights. The true values are n = 2.5, 5 dB shadowing and an 80 m decorrelation distance.
 
-Stages can be run one at a time, in this order (later stages read `results/learn.json`):
+| Quantity | Mean estimate | Spread (sd) |
+|---|---|---|
+| n | 2.48 | 0.19 |
+| Shadowing | 4.5 dB | |
+| Decorrelation distance | 75 m | 25 m |
 
-```bash
-python3 experiments.py learn roc kpi ttff tb esc con flip compare combo diag robust sens
-```
+In a separate check on 15 data sets, the nominal 95% intervals covered the true value in 80% of cases for n and 87% for the decorrelation distance. Several decorrelation intervals had no usable upper bound. With only a few flights, report the intervals as approximate. The decorrelation distance is the least certain of the three parameters.
 
-| Stage | Paper item |
-|---|---|
-| `learn` | Table 3 (learned weights and calibrated thresholds) |
-| `roc` | Fig. 9, AUC and detection at 5% FPR in Table 8 |
-| `kpi` | Table 7 |
-| `ttff` | Fig. 5 |
-| `tb` | Fig. 6 |
-| `con` | Fig. 7 |
-| `esc` | Fig. 8 |
-| `compare` | Table 8, rows (a) to (f), processing cost |
-| `combo` | Table 8, row (g): joint calibration of AeroFence OR innovation test |
-| `diag` | Table 3 intervals (1000-replicate drone and scene bootstrap), label-threshold refits, held-out Brier score and calibration error |
-| `robust` | Table 10: receiver gain offsets, transmit antenna pattern, spoofer power |
-| `flip` | Table 11 |
-| `sens` | Fig. 10, Tables 12 and 13 |
-
-Random seeds are fixed, so the numbers match the paper exactly. Data are split by
-scene: training seeds 1000-1059; test seeds 0-99, 2000-2039, 5000-5099 and 7000+.
-
-## License
-
-MIT, see `LICENSE`.
-
-## Data availability
-
-All data in the paper are simulated and are regenerated by the code from fixed seeds; the
-stored outputs are in `results/`. No field data have been collected yet. Field logs will be
-added under `field_data/` with the field results, subject to the operator's permission.
+The self-test numbers are SYNTHETIC. Never report them as measurements.
